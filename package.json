@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "better-sqlite3": "^7.6.2",
+    "snoowrap": "^1.23.0"
+  },
+  "name": "AutieRobot",
+  "scripts": {
+    "start": "node ."
+  }
+}
