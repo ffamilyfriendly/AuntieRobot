@@ -1,6 +1,7 @@
 const snoowrap = require("snoowrap"),
     config = require("./config"),
-    db = require("better-sqlite3")("reddit.db")
+    db = require("better-sqlite3")("reddit.db"),
+    fs = require("fs")
 
 
 const client = new snoowrap({
@@ -11,11 +12,36 @@ const client = new snoowrap({
     password: config.password
 })
 
-let dbCache = new Map()
-let modCache = new Map()
+const dbCache = new Map()
+const modCache = new Map()
+const tags = new Map()
+
+const saveTag = (name, value) => {
+    tags.set(name, value)
+    db.prepare("REPLACE INTO tags (id, text) VALUES(?,?)").run(name, value)
+}
+
+const getTag = (name) => {
+    if(tags.has(name)) return tags.get(name)
+    else {
+        const res = db.prepare("SELECT text FROM tags WHERE id = ?").get(name)
+        if(!res) return null
+        tags.set(name, res.text)
+        return res.text
+    }
+}
+
+const removeTag = (name) => {
+    if(tags.has(name)) tags.delete(name)
+    db.prepare("DELETE FROM tags WHERE id = ?").run(name)
+}
+
+module.exports = { db, saveTag, getTag, removeTag }
+
+const commands = new Map(fs.readdirSync('./commands').filter((f) => f.endsWith('.js')).map((f) => [f.split('.js')[0], require(`./commands/${f}`)]));
 
 db.prepare("CREATE TABLE IF NOT EXISTS handled (id TEXT PRIMARY KEY, reply TEXT NOT NULL)").run()
-db.prepare("CREATE NEW TABLE tags (id TEXT PRIMARY KEY, text TEXT NOT NULL)")
+db.prepare("CREATE TABLE IF NOT EXISTS tags (id TEXT PRIMARY KEY, text TEXT NOT NULL)").run()
 
 const hasReplied = (commentId) => {
     if(dbCache.has(commentId)) return dbCache.get(commentId)
@@ -29,6 +55,7 @@ const hasReplied = (commentId) => {
 }
 
 const setReplied = (commentId, replyId) => {
+    dbCache.set(commentId, replyId)
     db.prepare("INSERT INTO handled (id, reply) VALUES(?,?)").run(commentId, replyId)
 }
 
@@ -59,14 +86,36 @@ const getMentions = async () => {
         // Check if user is mod in this subreddit
         if(!modCache.get(mention.subreddit.display_name).includes(mention.author.name)) return
 
-        console.log(mention.body)
-
         // Check if bot has already handles this u/mention
         if(hasReplied(mention.id)) return
 
         const args = mention.body.split(" ").slice(1)
 
-        setReplied(mention.id, "TEST")
+        const reply = (content) => {
+            mention.reply(text(content)).then(r => {
+                setReplied(mention.id, r.id)
+            })
+        }
+
+        console.log(`Handling mention from ${mention.author.name} in ${mention.subreddit.display_name}: ${args.join(" ")}`)
+
+        if(commands.has(args[0])) {
+            commands.get(args[0])( args, mention, reply, client )
+        } else {
+            const tag = getTag(args[0])
+            if(tag) {
+                client.getComment(mention.parent_id)
+                    .reply(text(tag))
+                    .then(r => {
+                        setReplied(mention.id, r.id)
+                        try {
+                            r.distinguish({ status: true, sticky: true })
+                        } catch(err) {
+                            console.log(`failed to distiguish reply with id "${r.id}". `, err)
+                        }
+                    })
+            }
+        }
     }
 }
 
