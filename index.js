@@ -77,14 +77,18 @@ const getMentions = async () => {
     const mentions = await client.getInbox({ filter: "mentions" })
 
     for(const mention of mentions) {
+
         // If subreddit bot is tagged in aint in the subreddits array we wont respond
-        if(!config.subreddits.includes(mention.subreddit.display_name)) return
+        if(!config.subreddits.includes(mention.subreddit.display_name.toLowerCase())) return
 
         // Ensure the moderators of this subreddit has been cached
         if(!modCache.has(mention.subreddit.display_name)) modCache.set(mention.subreddit.display_name, await getMods(mention.subreddit.display_name))
         
         // Check if user is mod in this subreddit
         if(!modCache.get(mention.subreddit.display_name).includes(mention.author.name)) return
+
+        // Ensure that the user tag is the first part of the comment
+        if(!mention.body.toLowerCase().startsWith("u/auntierobot")) return
 
         // Check if bot has already handles this u/mention
         if(hasReplied(mention.id)) return
@@ -102,10 +106,14 @@ const getMentions = async () => {
         if(commands.has(args[0])) {
             commands.get(args[0])( args, mention, reply, client )
         } else {
-            const tag = getTag(args[0])
-            if(tag) {
+            let tags = []
+
+            for(const tagname of args)
+                tags.push(getTag(tagname))
+
+            if(tags.length !== 0) {
                 client.getComment(mention.parent_id)
-                    .reply(text(tag))
+                    .reply(text(tags.join("\n\n")))
                     .then(r => {
                         setReplied(mention.id, r.id)
                         try {

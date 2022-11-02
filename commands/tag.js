@@ -1,5 +1,5 @@
 const { PrivateMessage, Comment, snoowrap } = require("snoowrap")
-const { saveTag, removeTag, db } = require("../index")
+const { saveTag, removeTag, getTag, db } = require("../index")
 
 /**
  * 
@@ -26,8 +26,19 @@ module.exports = async ( args, mention, reply, client ) => {
 
     if(args[1] === "list") {
         const tags = db.prepare("SELECT id FROM tags").all()
-        console.log(tags)
         if(tags.length === 0) return reply("There are no tags registered :(")
         return reply(`There are **${tags.length}** tag(s) registered!\n\n${tags.map(i => `\`${i.id}\``).join(", ")}`)
+    }
+
+    if(args[1] === "raw") {
+        if(!args[2]) return reply("You need to specify what tag to show")
+        const tag = getTag(args[2])
+
+        let code = ""
+
+        for(const line of tag.split("\n"))
+            code += `    ${line}\n`
+
+        return reply(code)
     }
 }
