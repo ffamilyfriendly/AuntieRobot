@@ -177,7 +177,7 @@ const getMentions = async () => {
 }
 
 const getNewPosts = async () => {
-    const posts = await client.getSubreddit("auntierobot").getNew({ limit: 10,  })
+    const posts = await client.getSubreddit("nonutnovember").getNew({ limit: 10,  })
 
     for(const post of posts) {
         // Ensure the moderators of this subreddit has been cached
