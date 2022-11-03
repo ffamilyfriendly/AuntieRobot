@@ -16,6 +16,17 @@ const dbCache = new Map()
 const modCache = new Map()
 const tags = new Map()
 
+let rollcall = { date: 0, post: null }
+
+const getRollCall = async () => {
+    if(!rollcall.post || (rollcall.date + (1000 * 60 * 60) < Date.now())) {
+        const post = (await client.getSubreddit("nonutnovember").search({ query: `flair:"🗳️ Official Roll-Call"`, sort: "new", time: "day" }))[0]
+        rollcall = { date: Date.now(), post }
+    }
+
+    return rollcall.post
+}
+
 const saveTag = (name, value) => {
     tags.set(name, value)
     db.prepare("REPLACE INTO tags (id, text) VALUES(?,?)").run(name, value)
@@ -73,7 +84,6 @@ const getMods = (subreddit) => {
 const text = (t) => `${t}${config.textFooter}`
 
 const getMentions = async () => {
-    console.log("Beep boop, fetching mentions...")
     const mentions = await client.getInbox({ filter: "mentions" })
 
     for(const mention of mentions) {
@@ -101,6 +111,45 @@ const getMentions = async () => {
             })
         }
 
+        const replaceInlineValues = async (str) => {
+
+            const d = new Date()
+
+            const values = {
+                rollcall: await getRollCall(),
+                date: {
+                    day: d.getDate().toString().padStart(2, "0"),
+                    month: d.getMonth().toString().padStart(2, "0"),
+                    year: d.getFullYear()
+                },
+                mention: mention
+            }
+
+            str = str.replaceAll(/{.*?}/gi, (param) => {
+                param = param.replace(/{|}/gi, "")
+
+                let params = param.split(".")
+                
+                let obj = null
+                for(const i of params) {
+
+                    if(!obj && !values[i]) {
+                        obj = param
+                        break;
+                    }
+
+                    if(!obj && values[i]) obj = values[i]
+                    else {
+                        if(obj[i]) obj = obj[i]
+                    }
+                }
+
+                return obj
+            })
+
+            return str
+        }
+
         console.log(`Handling mention from ${mention.author.name} in ${mention.subreddit.display_name}: ${args.join(" ")}`)
 
         if(commands.has(args[0])) {
@@ -109,7 +158,7 @@ const getMentions = async () => {
             let tags = []
 
             for(const tagname of args)
-                tags.push(getTag(tagname))
+                tags.push(await replaceInlineValues(getTag(tagname)))
 
             if(tags.length !== 0) {
                 client.getComment(mention.parent_id)
@@ -127,6 +176,84 @@ const getMentions = async () => {
     }
 }
 
+const getNewPosts = async () => {
+    const posts = await client.getSubreddit("auntierobot").getNew({ limit: 10,  })
+
+    for(const post of posts) {
+        // Ensure the moderators of this subreddit has been cached
+        //if(!modCache.has(post.subreddit.display_name)) modCache.set(post.subreddit.display_name, await getMods(post.subreddit.display_name))
+        
+        // Check if user is mod in this subreddit. If mod, assume mod is not asking a common question, ignore mods post
+        //if(modCache.get(post.subreddit.display_name).includes(post.author.name)) return
+
+        // Check if bot has already handles this u/mention
+        if(hasReplied(post.id)) return
+
+        // if post has no text, ignore. TODO: add check for that fucking coupon image
+        //if(!post.selftext) return
+
+        const keywords = [ ...post.selftext.split(" "), ...post.title.split(" ") ]
+
+        let tags = [ ]
+
+        const replaceInlineValues = async (str) => {
+
+            const d = new Date()
+
+            const values = {
+                rollcall: await getRollCall(),
+                date: {
+                    day: d.getDate().toString().padStart(2, "0"),
+                    month: d.getMonth().toString().padStart(2, "0"),
+                    year: d.getFullYear()
+                },
+                mention: post
+            }
+
+            str = str.replaceAll(/{.*?}/gi, (param) => {
+                param = param.replace(/{|}/gi, "")
+
+                let params = param.split(".")
+                
+                let obj = null
+                for(const i of params) {
+
+                    if(!obj && !values[i]) {
+                        obj = param
+                        break;
+                    }
+
+                    if(!obj && values[i]) obj = values[i]
+                    else {
+                        if(obj[i]) obj = obj[i]
+                    }
+                }
+
+                return obj
+            })
+
+            return str
+        }
+
+        for(const trigger of config.triggers) {
+            for(const word of keywords) {
+                if(trigger[0].includes(word) && !tags.includes(trigger[1])) tags.push(await replaceInlineValues(getTag(trigger[1])))
+            }
+        }
+
+        if(tags.length === 0) {
+            setReplied(post.id, "postOK")
+        } else {
+            console.log(`Post with id ${post.id} `)
+            post.reply(text(tags.join("\n\n"))).then(r => {
+                setReplied(post.id, r.id)
+            })
+        }
+    }
+}
+
 getMentions()
+getNewPosts()
 
 setInterval(getMentions, config.pollRate)
+setInterval(getNewPosts, config.newPollRate)
