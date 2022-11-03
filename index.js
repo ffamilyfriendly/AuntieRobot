@@ -192,7 +192,7 @@ const getNewPosts = async () => {
         // if post has no text, ignore. TODO: add check for that fucking coupon image
         //if(!post.selftext) return
 
-        const keywords = [ ...post.selftext.split(" "), ...post.title.split(" ") ]
+        const keywords = [ ...post.selftext.toLowerCase().split(" "), ...post.title.toLowerCase().split(" ") ]
 
         let tags = [ ]
 
