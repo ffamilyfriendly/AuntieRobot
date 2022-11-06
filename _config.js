@@ -1,14 +1,18 @@
 module.exports = {
     username: "AuntieRobot",
     password: "secret",
-    clientID: "y",
-    clientSecret: "y",
-    subreddits: [ "subreddit" ],
+    clientID: "secret",
+    clientSecret: "secret",
+    subreddits: [ "nonutnovember", "auntierobot" ],
 
     // How often the bot will check for new mentions
     pollRate: 1000 * 20,
     // How often the bot will check new posts for triggers
     newPollRate: 1000 * 60,
+    // Check how often to check bots responses score
+    checkPostsPollRate: 1000 * 60 * 10,
+    // If comment made by bot has below this score the response will be deleted
+    removalLimit: -1,
 
     /**
      * Automatic triggers.
@@ -16,26 +20,21 @@ module.exports = {
      * 
      * format:
      * [
-     *  [ [ KEYWORDS ], "tag" ]
+     *  [ { all: [], any: [], none: [] }, "tag" ]
      * ]
     */
     triggers: [
         [
-            [ "dream", "woke up", "lucid", "dreams", "sleep" ], "dream"
+            { all: [ "dream" ], any: [ "woke up", "sleep", "wet", "lucid" ], none: [] }, "dream"
         ],
         [
-            [ "did i fail", "did i" ], "didi"
+            { all: [ "dec" ], any: [ "continue", "make up", "failed" ], none: [] }, "excused"
         ],
         [
-            [ "coupon", "these work" ], "coupon"
-        ],
-        [
-            ["can i", "have sex", "edge", "watch porn"], "cani"
-        ],
-        [
-            ["precum"], "nutting"
+            { all: [  ], any: [ "prenut" ], none: [] }, "nutting"
         ]
     ],
+
+    textFooter: "\n\n---\nThis action was performed *Auto-Magically™*. View the source code [HERE](https://github.com/ffamilyfriendly/AuntieRobot). Any questions regarding the bot are to be sent to u\/AuntieRob\n\n^This ^answer ^was ^made ^automatically. ^Downvote ^this ^comment ^if ^answer ^is ^irrelevant"
     
-    textFooter: "\n\n---\nThis action was performed *Auto-Magically™*. View the source code [HERE](https://github.com/ffamilyfriendly/AuntieRobot). Any questions regarding the bot are to be sent to u\/AuntieRob"
 }

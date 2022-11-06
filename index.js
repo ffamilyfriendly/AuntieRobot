@@ -181,10 +181,10 @@ const getNewPosts = async () => {
 
     for(const post of posts) {
         // Ensure the moderators of this subreddit has been cached
-        //if(!modCache.has(post.subreddit.display_name)) modCache.set(post.subreddit.display_name, await getMods(post.subreddit.display_name))
+        if(!modCache.has(post.subreddit.display_name)) modCache.set(post.subreddit.display_name, await getMods(post.subreddit.display_name))
         
         // Check if user is mod in this subreddit. If mod, assume mod is not asking a common question, ignore mods post
-        //if(modCache.get(post.subreddit.display_name).includes(post.author.name)) return
+        if(modCache.get(post.subreddit.display_name).includes(post.author.name)) return
 
         // Check if bot has already handles this u/mention
         if(hasReplied(post.id)) return
@@ -192,7 +192,7 @@ const getNewPosts = async () => {
         // if post has no text, ignore. TODO: add check for that fucking coupon image
         //if(!post.selftext) return
 
-        const keywords = [ ...post.selftext.toLowerCase().split(" "), ...post.title.toLowerCase().split(" ") ]
+        const txt = (post.selftext.toLowerCase() + " " + post.title.toLowerCase()).replace(/[^A-Za-z0-9 ]/gi, "")
 
         let tags = [ ]
 
@@ -235,15 +235,41 @@ const getNewPosts = async () => {
             return str
         }
 
+        const usedTags = []
+
         for(const trigger of config.triggers) {
-            for(const word of keywords) {
-                if(trigger[0].includes(word) && !tags.includes(trigger[1])) tags.push(await replaceInlineValues(getTag(trigger[1])))
+            const filters = trigger[0]
+
+            const matchesAll = () => {
+                for(const w of filters.all) {
+                    if(!txt.indexOf(w)) return false
+                }
+                return true
+            }
+            
+            const matchesAny = () => {
+                if(filters.any.length === 0) return true
+                for(const w of filters.any) {
+                    if(txt.indexOf(w)) return true
+                }
+                return false
+            }
+
+            const matchesNone = () => {
+                for(const w of filters.none) {
+                    if(txt.indexOf(w)) return false
+                }
+
+                return true
+            }
+
+            if(matchesAll() && matchesAny() && matchesNone()) {
+                usedTags.push(trigger[1])
+                tags.push(await replaceInlineValues(getTag(trigger[1])))
             }
         }
 
-        if(tags.length === 0) {
-            setReplied(post.id, "postOK")
-        } else {
+        if(tags.length !== 0) {
             console.log(`Post with id ${post.id} `)
             post.reply(text(tags.join("\n\n"))).then(r => {
                 setReplied(post.id, r.id)
@@ -252,8 +278,31 @@ const getNewPosts = async () => {
     }
 }
 
+const checkPostScores = async () => {
+    const rows = db.prepare("SELECT * FROM handled WHERE reply != 'postOK' AND reply != 'postDELETED'").all().map(r => r.reply)
+
+    const DELAY = 500
+    for(let i = 0; i < rows.length; i++) {
+        const comment = rows[i]
+
+        setTimeout(() => {
+            const cmt = client.getComment(comment)
+            cmt.score.then(score => {
+                if(score <= config.removalLimit) {
+                    console.log(`Removing comment with id "${comment}" as score is below limit. ${score} <= ${config.removalLimit}`)
+                    cmt.delete().then(() => {
+                        db.prepare("UPDATE handled SET reply = 'postDELETED' WHERE reply = ?").run(comment)
+                    })
+                }
+            })
+        }, i * DELAY)
+    }
+}
+
 getMentions()
 getNewPosts()
+checkPostScores()
 
 setInterval(getMentions, config.pollRate)
 setInterval(getNewPosts, config.newPollRate)
+setInterval(checkPostScores, config.checkPostsPollRate)
