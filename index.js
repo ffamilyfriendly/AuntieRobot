@@ -242,7 +242,7 @@ const getNewPosts = async () => {
 
             const matchesAll = () => {
                 for(const w of filters.all) {
-                    if(!txt.indexOf(w)) return false
+                    if(!txt.includes(w)) return false
                 }
                 return true
             }
@@ -250,14 +250,14 @@ const getNewPosts = async () => {
             const matchesAny = () => {
                 if(filters.any.length === 0) return true
                 for(const w of filters.any) {
-                    if(txt.indexOf(w)) return true
+                    if(txt.includes(w)) return true
                 }
                 return false
             }
 
             const matchesNone = () => {
                 for(const w of filters.none) {
-                    if(txt.indexOf(w)) return false
+                    if(txt.includes(w)) return false
                 }
 
                 return true
@@ -299,9 +299,9 @@ const checkPostScores = async () => {
     }
 }
 
-getMentions()
+//getMentions()
 getNewPosts()
-checkPostScores()
+//checkPostScores()
 
 setInterval(getMentions, config.pollRate)
 setInterval(getNewPosts, config.newPollRate)
