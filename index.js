@@ -85,6 +85,9 @@ const text = (t) => `${t}${config.textFooter}`
 
 const getMentions = async () => {
     const mentions = await client.getInbox({ filter: "mentions" })
+    const mentionIDs = mentions.map(m => `t1_${m.id}`)
+    
+    client.markMessagesAsRead(mentionIDs)
 
     for(const mention of mentions) {
 
@@ -175,6 +178,8 @@ const getMentions = async () => {
         }
     }
 }
+
+let autoPosts = new Set()
 
 const getNewPosts = async () => {
     const posts = await client.getSubreddit("nonutnovember").getNew({ limit: 10,  })
@@ -273,22 +278,22 @@ const getNewPosts = async () => {
             console.log(`Post with id ${post.id} `)
             post.reply(text(tags.join("\n\n"))).then(r => {
                 setReplied(post.id, r.id)
+                autoPosts.add(r.id)
             })
         }
     }
 }
 
 const checkPostScores = async () => {
-    const rows = db.prepare("SELECT * FROM handled WHERE reply != 'postOK' AND reply != 'postDELETED'").all().map(r => r.reply)
 
     const DELAY = 500
-    for(let i = 0; i < rows.length; i++) {
-        const comment = rows[i]
+    for(let comment of autoPosts) {
 
         setTimeout(() => {
             const cmt = client.getComment(comment)
             cmt.score.then(score => {
                 if(score <= config.removalLimit) {
+                    autoPosts.delete(comment)
                     console.log(`Removing comment with id "${comment}" as score is below limit. ${score} <= ${config.removalLimit}`)
                     cmt.delete().then(() => {
                         db.prepare("UPDATE handled SET reply = 'postDELETED' WHERE reply = ?").run(comment)
@@ -299,9 +304,9 @@ const checkPostScores = async () => {
     }
 }
 
-//getMentions()
+getMentions()
 getNewPosts()
-//checkPostScores()
+checkPostScores()
 
 setInterval(getMentions, config.pollRate)
 setInterval(getNewPosts, config.newPollRate)
