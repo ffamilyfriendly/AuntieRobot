@@ -3,8 +3,9 @@
     "better-sqlite3": "^7.6.2",
     "snoowrap": "^1.23.0"
   },
-  "name": "AutieRobot",
+  "name": "auntierobot",
   "scripts": {
-    "start": "node ."
+    "start": "node .",
+    "flairs": "node ./FlairAssign/index.js"
   }
 }
