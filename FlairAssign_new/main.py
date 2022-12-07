@@ -2,10 +2,10 @@ import json
 import praw
 import os
 import math
+import time
 import curses
-from curses.textpad import Textbox, rectangle
-from enum import Enum
-import copy
+from curses.textpad import Textbox
+import webbrowser
 
 #   I suck at python but praw is better documented/maintained than snoowrap
 #   so i guess i better learn python lol
@@ -52,6 +52,106 @@ class _status:
     SELECTED = 6
 status = _status()
 
+#def progBar(value: int, min: int = 0, max: int = 100, display: str = "#"):
+
+class _EmbedInputTypes:
+    TEXTINPUT = 1
+    TOGGLE = 2
+    LABLE = 3
+    SLIDER = 4
+EmbedInputTypes = _EmbedInputTypes()
+
+def embed(title: str = "embed", elements = []):
+    win = curses.newwin(int(curses.LINES / 2), int(curses.COLS / 2), int(curses.LINES / 4), int(curses.COLS / 4) )
+    win.keypad(True)
+    HEIGHT = int(curses.LINES / 2)
+    WIDTH = int(curses.COLS / 2)
+
+    cursor = 0
+    val = { }
+
+    inputMode = True
+
+    def draw():
+        KEYBINDS = "^x: exit | ↑ prev item | ↓ next item"
+        win.clear()
+        win.border()
+        win.addstr(HEIGHT - 2, WIDTH - (len(KEYBINDS) + 2), KEYBINDS)
+        win.addstr(0, 2, title, curses.color_pair(status.SELECTED))
+
+        for index, element in enumerate(elements):
+            h = 1 + (index * 2)
+            eType = element["type"]
+
+            selected = index == cursor
+            style = curses.color_pair(status.SELECTED) if selected else curses.A_BOLD
+
+            if eType == EmbedInputTypes.LABLE:
+                win.addstr(h, 1, element["value"] if "value" in element else "<text>", style)
+            elif eType == EmbedInputTypes.TEXTINPUT:
+                win.addstr(h, 1, "{}:".format(element["title"]), style)
+                win.addstr(" " + val[element["title"]] if element["title"] in val else "")
+            elif eType == EmbedInputTypes.TOGGLE:
+                toggled = element["value"] if "value" in element else (val[element["title"]] if element["title"] in val else False)
+                win.addstr(h, 1, "{}:".format(element["title"]), style)
+                win.addstr(" ")
+                win.addstr(" True " if toggled else " False ", curses.color_pair(status.OK) if toggled else curses.color_pair(status.ERROR))
+            elif eType == EmbedInputTypes.SLIDER:
+                prog = float(element["value"] if "value" in element else (val[element["title"]] if element["title"] in val else 0.0))
+                win.addstr(h, 1, "{}:".format(element["title"]), style)
+                win.addstr(" ")
+                win.addstr("[{}{}]".format("#"*math.floor(prog*2), " "*math.floor(20-prog*2)), curses.A_BOLD)
+                win.addstr(" {}%".format(prog * 10))
+
+        win.refresh()
+
+
+    draw()
+
+    while inputMode:
+        v = win.getch()
+
+        if v == 259:
+            cursor = max(0, cursor - 1)
+        elif v == 258:
+            cursor = min(cursor + 1, len(elements))
+        elif v == 24:
+            inputMode = False
+        else:
+            sElement = elements[cursor]
+
+            if sElement["type"] == EmbedInputTypes.TEXTINPUT:
+                if not sElement["title"] in val:
+                    val[sElement["title"]] = ""
+
+                if v == 8:
+                    val[sElement["title"]] = val[sElement["title"]][:-1]
+                elif v == 10:
+                    val[sElement["title"]] += "\\n"
+                else:
+                    val[sElement["title"]] += chr(v)
+            elif sElement["type"] == EmbedInputTypes.TOGGLE:
+                if not sElement["title"] in val:
+                    val[sElement["title"]] = sElement["val"] if "val" in sElement else False
+
+                if v == 10:
+                    val[sElement["title"]] = not val[sElement["title"]]
+            elif sElement["type"] == EmbedInputTypes.SLIDER:
+                if sElement["title"] not in val:
+                    val[sElement["title"]] = sElement["val"] if "val" in sElement else 0.0
+                # H: 261 V: 260
+                value = val[sElement["title"]]
+                if v == 261:
+                    val[sElement["title"]] = min(value + 0.5, 10)
+                elif v == 260:
+                    val[sElement["title"]] = max(value - 0.5, 0)
+                
+                
+        draw()
+    
+    return val
+
+
 def center( text: str ):
     startingXPos = int ( (curses.COLS - len(text))/2 )
     return startingXPos
@@ -74,11 +174,11 @@ def getYear(year):
 
     for i in y["posts"]:
         index += 1
+        setStatusString("{}: Getting post for day {}...".format(year, index), status.INFO)
         rollcall = client.submission(i)
+        setStatusString("{}: Post ({}) for day {} has {} comments. Fetching comments".format(year, i, index, rollcall.num_comments), status.OK)
         rollcall.comments.replace_more(limit=None)
         comments = rollcall.comments.list()
-
-        print("Day {}: {} comments!".format(index, len(comments)))
 
         for comment in comments:
             if hasattr(comment.author, "lower") and comment.author.lower() == "auntierob":
@@ -88,7 +188,7 @@ def getYear(year):
     return rv
 
 def checkYear(year):
-    setStatusString(year, status.INFO)
+    getYear(year)
 
 commands = [ ]
 selectedCommand = 0
@@ -129,7 +229,7 @@ def menuSystem( menuItems ):
         if cmd is not None and callable(cmd["run"]):
             parameters = []
 
-            if(cmd["parameters"]):
+            if("parameters" in cmd):
                 parameters = cmd["parameters"]
 
             cmd["run"](*parameters)
@@ -143,7 +243,7 @@ def main():
 
     setStatusString("Logging in...", status.INFO)
 
-    setStatusString("Logged in as {}!".format(client.user.me()), status.OK)
+    #setStatusString("Logged in as {}!".format(client.user.me()), status.OK)
 
     
     def checkFlairList():
@@ -152,10 +252,26 @@ def main():
             rv.append( { "title": "check {} ({} rollcalls)".format(i, len(rollcalls[i]["posts"])), "run": checkYear, "parameters": [ i ] } )
         return rv
 
+    def test():
+        d = embed("Check User",
+            [ 
+                { "value": "Select a user (u/ not needed)", "type": EmbedInputTypes.LABLE },
+                { "title": "Username", "type": EmbedInputTypes.TEXTINPUT }
+            ]
+        )
+
+        user = d["Username"] if "Username" in d else None
+
+        if user is None:
+            setStatusString("No user selected.", status.ERROR)
+            return
+        setStatusString("Gathering data pertaining to u/{}".format(user), status.INFO)
+        
+
     menuSystem( [ 
         [ "Check Flairs", checkFlairList() ],
-        [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": "" } ] ],
-        [ "Database Actions", [ { "title": "Clear Database", "run": "" } ] ]
+        [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": test } ] ],
+        [ "Misc", [ { "title": "Clear Database", "run": "" }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
      ] )
     #getYear(2022)
 
