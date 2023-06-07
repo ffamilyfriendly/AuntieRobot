@@ -6,6 +6,6 @@
   "name": "auntierobot",
   "scripts": {
     "start": "node .",
-    "flairs": "python3 ./FlairAssign_new/main.py"
+    "flairs": "py ./FlairAssign_new/main.py"
   }
 }

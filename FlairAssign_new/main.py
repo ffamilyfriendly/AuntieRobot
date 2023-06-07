@@ -5,6 +5,7 @@ import math
 import time
 import curses
 from curses.textpad import Textbox
+from praw.models import MoreComments, Comment
 import webbrowser
 
 #   I suck at python but praw is better documented/maintained than snoowrap
@@ -61,6 +62,26 @@ class _EmbedInputTypes:
     SLIDER = 4
 EmbedInputTypes = _EmbedInputTypes()
 
+def postProgress(title: str = "title", prog: int = 0, tot: int = 1):
+    win = curses.newwin(int(curses.LINES / 4), int(curses.COLS / 2), 3, int(curses.COLS / 4))
+    HEIGHT = int(curses.LINES / 4)
+    WIDTH = int(curses.COLS / 2)
+
+    def draw():
+        win.clear()
+        
+
+        percent = prog / tot
+        charAmount = math.ceil((percent * WIDTH))
+        disp = "{}>{}".format("=" * (charAmount - 1), " " * (WIDTH - charAmount))
+
+        win.addstr(HEIGHT - 4, 1, "{}/{} ({}%)".format(prog, tot, round(percent * 100, 1)), curses.color_pair(status.INFO))
+        win.addstr(HEIGHT - 2, 0, disp, curses.color_pair(status.SELECTED))
+        win.border()
+        win.addstr(0, 2, title, curses.color_pair(status.SELECTED))
+        win.refresh()
+    draw()
+
 def embed(title: str = "embed", elements = []):
     win = curses.newwin(int(curses.LINES / 2), int(curses.COLS / 2), int(curses.LINES / 4), int(curses.COLS / 4) )
     win.keypad(True)
@@ -79,10 +100,25 @@ def embed(title: str = "embed", elements = []):
         win.addstr(HEIGHT - 2, WIDTH - (len(KEYBINDS) + 2), KEYBINDS)
         win.addstr(0, 2, title, curses.color_pair(status.SELECTED))
 
-        for index, element in enumerate(elements):
-            h = 1 + (index * 2)
-            eType = element["type"]
+        MAXHEIGHT = HEIGHT - 2
 
+        MAXITEMS = math.floor(MAXHEIGHT/2) - 1
+
+        for index, element in enumerate(elements):
+
+            if cursor > MAXITEMS:
+                if index > cursor or index < cursor - MAXITEMS:
+                    continue
+
+                offset =  cursor - index
+                h = 1 + ((MAXITEMS - offset) * 2) 
+            else:
+                h = 1 + (index * 2)
+
+            if h > MAXHEIGHT or h < 0:
+                continue
+
+            eType = element["type"]
             selected = index == cursor
             style = curses.color_pair(status.SELECTED) if selected else curses.A_BOLD
 
@@ -149,6 +185,10 @@ def embed(title: str = "embed", elements = []):
                 
         draw()
     
+    win.erase()
+    stdscr.clear()
+    stdscr.refresh()
+
     return val
 
 
@@ -167,6 +207,11 @@ def setStatusString( statusText: str, statusType: status ):
 
 
 def getYear(year):
+
+    def progBar():
+        progbar = ""
+        setStatusString(progBar, status.INFO)
+
     rv = { }
 
     y = rollcalls[ str(year) ]
@@ -238,18 +283,100 @@ def menuSystem( menuItems ):
     
     menuSystem( menuItems )
 
+def checkPost( post_id ):
+    post = client.submission(id=post_id)
+
+    c = post.comments
+
+    def filter(l):
+        raw_Comments = [a for a in l if not isinstance(a, MoreComments)]
+        more_Comments = [a for a in l if isinstance(a, MoreComments)]
+        return ( raw_Comments, more_Comments )
+
+    r = filter(c)
+
+    rawComments = r[0]
+    moreComments = r[1]
+
+    def loadAll():
+        if len(moreComments) == 0:
+            return
+        more = moreComments.pop(0)
+        if not more or not isinstance(more, MoreComments):
+            return
+        time.sleep(1)
+        postProgress("Loading comments of {}".format(post_id), len(rawComments), post.num_comments)
+        contents = filter(more.comments())
+        rawComments.extend(contents[0])
+        moreComments.extend(contents[1])
+        loadAll()
+    loadAll()
+    
+    f = open("./uc.txt", "w", encoding="utf-8")
+    
+    for comment in rawComments:
+        if not isinstance(comment, Comment):
+            print("NOT INSTANCE OF COMMENT")
+            continue;
+        else:
+            if comment.author is not None:
+                f.write("{}: {}\n".format(comment.author.name, comment.body[:20]))
+    f.close()
+
+
+        
+
+    #i = 0
+    #def checkForrest( forrest ):
+    #    for comment in forrest:
+    #        time.sleep(0.1)
+    #        if isinstance(comment, MoreComments):
+    #            checkForrest(comment.comments())
+    #        else:
+    #            postProgress("Checking {} ({})".format(post_id, post.num_comments), i, post.num_comments)
+    #checkForrest(post.comments)
+
+def yearSelectMode(year):
+    # { "title": "day1", "type": EmbedInputTypes.TOGGLE }
+    def getDays():
+        dayArr = [ { "value": "Select what days you want to check\n (1 at a time recomended)", "type": EmbedInputTypes.LABLE } ]
+        for day in range(len(rollcalls[year]["posts"])):
+            dayArr.append( { "title": "day {}".format(day + 1), "type": EmbedInputTypes.TOGGLE } )
+        return dayArr
+
+
+    answer = embed("{}: {} rollcalls".format(year, len(rollcalls[year]["posts"])), getDays())
+    
+    posts = []
+
+    for key, value in answer.items():
+        if not value:
+            continue
+        day = int("".join(i for i in key if i in "0123456789")) - 1
+        posts.append(rollcalls[year]["posts"][day])
+
+    if len(posts) >= 1:
+        checkPost(posts[0])
+    else:
+        setStatusString("no post(s) selected", status.ERROR)
 
 def main():
 
     setStatusString("Logging in...", status.INFO)
-
     #setStatusString("Logged in as {}!".format(client.user.me()), status.OK)
+
+    def testtwo():
+        for i in range(0,100):
+            postProgress("tet", i, 100)
+            time.sleep(.5)
+        
+        
 
     
     def checkFlairList():
         rv = [ ]
         for i in rollcalls:
-            rv.append( { "title": "check {} ({} rollcalls)".format(i, len(rollcalls[i]["posts"])), "run": checkYear, "parameters": [ i ] } )
+            rv.append( { "title": "check {} ({} rollcalls)".format(i, len(rollcalls[i]["posts"])), "run": yearSelectMode, "parameters": [ i ] } )
         return rv
 
     def test():
@@ -262,7 +389,7 @@ def main():
 
         user = d["Username"] if "Username" in d else None
 
-        if user is None:
+        if not user:
             setStatusString("No user selected.", status.ERROR)
             return
         setStatusString("Gathering data pertaining to u/{}".format(user), status.INFO)
@@ -271,7 +398,7 @@ def main():
     menuSystem( [ 
         [ "Check Flairs", checkFlairList() ],
         [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": test } ] ],
-        [ "Misc", [ { "title": "Clear Database", "run": "" }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
+        [ "Misc", [ { "title": "Clear Database", "run": testtwo }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
      ] )
     #getYear(2022)
 
