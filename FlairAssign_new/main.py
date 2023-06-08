@@ -4,12 +4,63 @@ import os
 import math
 import time
 import curses
+import sqlite3
+import re
 from curses.textpad import Textbox
 from praw.models import MoreComments, Comment
 import webbrowser
 
 #   I suck at python but praw is better documented/maintained than snoowrap
 #   so i guess i better learn python lol
+
+dbCon = sqlite3.connect("data.db")
+
+def ensureTables():
+    cur = dbCon.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS posts(year, post, user, content, flag)")
+
+def postChecked(post):
+    cur = dbCon.cursor()
+    res = cur.execute("SELECT post FROM posts WHERE post=?", (post,))
+    return not ( res.fetchone() is None )
+
+def clearDatabase():
+    cur = dbCon.cursor()
+    cur.execute("DELETE FROM posts")
+    dbCon.commit()
+
+def handleComments(year, postid, comments):
+    cur = dbCon.cursor()
+    data = []
+
+    for comment in comments:
+        if isinstance(comment, Comment) and comment.author is not None:
+            still_in_matches = ["still in", "reporting", "present", "here"]
+            out_matches = [ "im out", "i lost" ]
+
+            regex = re.compile('[^a-zA-Z ]')
+
+            comment_body = regex.sub('', comment.body.lower())
+
+            still_in = any([ x in comment_body for x in still_in_matches ])
+            now_out = any([ x in comment_body for x in out_matches ])
+
+            flag = 0 # default
+            if still_in:
+                flag = 1 # user is in :)
+            if now_out:
+                flag = 2 # user is out :(
+            if still_in and now_out:
+                flag = 3 # user is both??
+            
+            # flag 3 and 0 means something aint right
+
+            data.append( ( year, postid, comment.author.name, comment_body[:300], flag ) )
+        else:
+            continue
+
+    cur.executemany("INSERT INTO posts VALUES(?,?,?,?,?)", data)
+    dbCon.commit()
 
 config = json.load(open("./FlairAssign_new/config.json"))
 rollcalls = json.load(open("./FlairAssign_new/rollcalls.json"))
@@ -283,7 +334,7 @@ def menuSystem( menuItems ):
     
     menuSystem( menuItems )
 
-def checkPost( post_id ):
+def checkPost( year, post_id ):
     post = client.submission(id=post_id)
 
     c = post.comments
@@ -312,16 +363,7 @@ def checkPost( post_id ):
         loadAll()
     loadAll()
     
-    f = open("./uc.txt", "w", encoding="utf-8")
-    
-    for comment in rawComments:
-        if not isinstance(comment, Comment):
-            print("NOT INSTANCE OF COMMENT")
-            continue;
-        else:
-            if comment.author is not None:
-                f.write("{}: {}\n".format(comment.author.name, comment.body[:20]))
-    f.close()
+    handleComments(year, post_id, rawComments)
 
 
         
@@ -341,7 +383,7 @@ def yearSelectMode(year):
     def getDays():
         dayArr = [ { "value": "Select what days you want to check\n (1 at a time recomended)", "type": EmbedInputTypes.LABLE } ]
         for day in range(len(rollcalls[year]["posts"])):
-            dayArr.append( { "title": "day {}".format(day + 1), "type": EmbedInputTypes.TOGGLE } )
+            dayArr.append( { "title": "{}day {}".format("✓ " if postChecked(rollcalls[year]["posts"][day]) else "✗ ",day + 1), "type": EmbedInputTypes.TOGGLE } )
         return dayArr
 
 
@@ -356,19 +398,30 @@ def yearSelectMode(year):
         posts.append(rollcalls[year]["posts"][day])
 
     if len(posts) >= 1:
-        checkPost(posts[0])
+        for post in posts:
+            checkPost(year, post)
     else:
         setStatusString("no post(s) selected", status.ERROR)
 
 def main():
+    ensureTables()
 
     setStatusString("Logging in...", status.INFO)
     #setStatusString("Logged in as {}!".format(client.user.me()), status.OK)
 
-    def testtwo():
-        for i in range(0,100):
-            postProgress("tet", i, 100)
-            time.sleep(.5)
+    def deleteDataAction():
+        d = embed("Clear Database", 
+            [
+                { "value": "type \"CONFIRM\" to proceed", "type": EmbedInputTypes.LABLE },
+                { "title": "answer", "type": EmbedInputTypes.TEXTINPUT }
+            ]
+        )
+
+        if d["answer"] and d["answer"] == "CONFIRM":
+            clearDatabase()
+            setStatusString("Database cleared.", status.OK)
+        else:
+            setStatusString("Action aborted.", status.INFO)
         
         
 
@@ -398,7 +451,7 @@ def main():
     menuSystem( [ 
         [ "Check Flairs", checkFlairList() ],
         [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": test } ] ],
-        [ "Misc", [ { "title": "Clear Database", "run": testtwo }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
+        [ "Misc", [ { "title": "Clear Database", "run": deleteDataAction }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
      ] )
     #getYear(2022)
 
