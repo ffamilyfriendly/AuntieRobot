@@ -24,6 +24,11 @@ def postChecked(post):
     res = cur.execute("SELECT post FROM posts WHERE post=?", (post,))
     return not ( res.fetchone() is None )
 
+def getUserPosts(username):
+    cur = dbCon.cursor()
+    res = cur.execute("SELECT * FROM posts WHERE user=?", (username, ))
+    return res.fetchall()
+
 def clearDatabase():
     cur = dbCon.cursor()
     cur.execute("DELETE FROM posts")
@@ -355,7 +360,7 @@ def checkPost( year, post_id ):
         more = moreComments.pop(0)
         if not more or not isinstance(more, MoreComments):
             return
-        time.sleep(1)
+        time.sleep(0.3)
         postProgress("Loading comments of {}".format(post_id), len(rawComments), post.num_comments)
         contents = filter(more.comments())
         rawComments.extend(contents[0])
@@ -446,12 +451,42 @@ def main():
             setStatusString("No user selected.", status.ERROR)
             return
         setStatusString("Gathering data pertaining to u/{}".format(user), status.INFO)
+        res = getUserPosts(user)
+        if not res:
+            return setStatusString("No info found for user u/{}".format(user), status.ERROR)
+        else:
+            yearList = {}
+            embedItems = []
+            for row in res:
+                print(row)
+                aids = yearList.get(row[0])
+                if aids:
+                    yearList[row[0]] = aids + 1
+                else:
+                    yearList[row[0]] = 1
+
+            for year, posts in yearList.items():
+                embedItems.append( { "value": "{}: {} posts".format(year, posts), "type": EmbedInputTypes.LABLE } )
+                
+            embed("u/{}".format(user), embedItems)
+
+    def fetchRollcalls():
+        setStatusString("searching...", status.INFO)
+        res = client.subreddit("nonutnovember").search(query="flair:Official+Roll-Call", time_filter="all")
+        f = open("rollcalls.csv", "w")
+        for post in res:
+            if not post:
+                continue;
+            f.write("{},{},{}\n".format(post.created_utc, post.name, post.id, post.permalink, post.author.name if post.author is not None else "u/deleted"))
+        f.close()
+
+
         
 
     menuSystem( [ 
         [ "Check Flairs", checkFlairList() ],
         [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": test } ] ],
-        [ "Misc", [ { "title": "Clear Database", "run": deleteDataAction }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") } ] ]
+        [ "Misc", [ { "title": "Clear Database", "run": deleteDataAction }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") }, { "title": "fetch rollcalls", "run": fetchRollcalls } ] ]
      ] )
     #getYear(2022)
 
