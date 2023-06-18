@@ -18,11 +18,27 @@ dbCon = sqlite3.connect("data.db")
 def ensureTables():
     cur = dbCon.cursor()
     cur.execute("CREATE TABLE IF NOT EXISTS posts(year, post, user, content, flag)")
+    cur.execute("CREATE TABLE IF NOT EXISTS users(user PRIMARY KEY, old_flair, new_flair)")
 
 def postChecked(post):
     cur = dbCon.cursor()
     res = cur.execute("SELECT post FROM posts WHERE post=?", (post,))
     return not ( res.fetchone() is None )
+
+def insertUser(user, old_flair, new_flair):
+    cur = dbCon.cursor()
+    res = cur.execute("INSERT INTO users VALUES(?,?,?)", ( user, old_flair, new_flair ))
+    dbCon.commit()
+
+def getUser(user):
+    cur = dbCon.cursor()
+    res = cur.execute("SELECT * FROM users WHERE user = ?", ( user, ))
+    return res.fetchone()
+
+def getUsers(post_id):
+    cur = dbCon.cursor()
+    res = cur.execute("SELECT DISTINCT user FROM posts WHERE post=?", (post_id,))
+    return res.fetchall()
 
 def getUserPosts(username):
     cur = dbCon.cursor()
@@ -261,36 +277,6 @@ def setStatusString( statusText: str, statusType: status ):
     stdscr.addstr(3, center(s), s, curses.color_pair(statusType))
     stdscr.refresh()
 
-
-def getYear(year):
-
-    def progBar():
-        progbar = ""
-        setStatusString(progBar, status.INFO)
-
-    rv = { }
-
-    y = rollcalls[ str(year) ]
-    index = 0
-
-    for i in y["posts"]:
-        index += 1
-        setStatusString("{}: Getting post for day {}...".format(year, index), status.INFO)
-        rollcall = client.submission(i)
-        setStatusString("{}: Post ({}) for day {} has {} comments. Fetching comments".format(year, i, index, rollcall.num_comments), status.OK)
-        rollcall.comments.replace_more(limit=None)
-        comments = rollcall.comments.list()
-
-        for comment in comments:
-            if hasattr(comment.author, "lower") and comment.author.lower() == "auntierob":
-                print(comment)
-
-
-    return rv
-
-def checkYear(year):
-    getYear(year)
-
 commands = [ ]
 selectedCommand = 0
 
@@ -338,6 +324,95 @@ def menuSystem( menuItems ):
             setStatusString("command \"{}\" has no callable function".format(cmd["title"]), status.ERROR)
     
     menuSystem( menuItems )
+
+def applyFlair( user: str, flair: str ):
+    if not flair or not user:
+        return False
+    if getUser(user):
+        return "already handled"
+    
+    currFlair = client.subreddit("nonutnovember").flair(redditor=user)
+    oldFlair = ""
+    for _flair in currFlair:
+        oldFlair = _flair["flair_text"]
+    
+    # Try to check "worth" of old flair and compare to new
+    # We dont want to give trebble by mistake to a fourfold
+    # if worth of new flair is less than old flair try sending a dm to user explaining
+
+    client.subreddit("nonutnovember").flair.set(user, text=flair)
+    insertUser(user, oldFlair, flair)
+    return True
+    
+
+
+# this is arguably the worst code i've ever written
+def constructFlair( years: dict ):
+    l = len(years)
+
+    keys = list(years.keys())
+
+    if l == 0:
+        return None
+    if l == 1:
+        return "DiamondNoNutter {} :diamondnut18:".format(keys[0])
+    if l == 2:
+        return "DiamondNoNutter {} and {} :diamondnut18:".format(keys[0], keys[1])
+    if l == 3:
+        return "Diamond Treble :diamondnut18::diamondnut18::diamondnut18:"
+    if l == 4:
+        return "Diamond Fourfold :d::d::d::d:"
+
+def checkUser( username ):
+    # year, post, user, content, flag
+    posts = getUserPosts(username)
+
+    def takeYear(elem):
+        return int(elem[0])
+    posts.sort(key=takeYear)
+    years = { }
+
+
+    for row in posts:
+        year = row[0]
+        post_flag = row[4]
+        if not years.get(year):
+            years[year] = { "timesIn": 0, "timesOut": 0, "timesWeird": 0, "answeredLastPost": False }
+        
+        yr_rollcalls = rollcalls[year]
+
+        if row[1] == yr_rollcalls["posts"][-1]:
+            years[year]["answeredLastPost"] = True
+
+
+        match post_flag:
+            case 1:
+                years[year]["timesIn"] = years[year]["timesIn"] + 1
+            case 2:
+                years[year]["timesOut"] = years[year]["timesOut"] + 1
+            case _:
+                years[year]["timesWeird"] = years[year]["timesWeird"] + 1
+
+    years_flairs = { }
+
+    for year, res in years.items():
+        yr_rollcalls = rollcalls[year]
+
+        if (res["timesIn"] + res["timesWeird"]) < yr_rollcalls["required"]:
+            continue; # less than required = bonk. We also only check results that are weird or indicated as still in
+    
+        if res["timesOut"] != 0 and not res["answeredLastPost"]:
+            continue; # if indicated out and did not answer last post, bonk
+    
+        if res["timesOut"] > 3:
+            continue; # user indicated out 3 times. The reason this is not at 1 is that I dont trust my very simple labler
+
+        years_flairs[year] = True
+
+    print(years)
+    print(years_flairs)
+    print(constructFlair(years_flairs))
+    return constructFlair(years_flairs)
 
 def checkPost( year, post_id ):
     post = client.submission(id=post_id)
@@ -408,6 +483,11 @@ def yearSelectMode(year):
     else:
         setStatusString("no post(s) selected", status.ERROR)
 
+def applyAllFlairs():
+    users = getUsers(rollcalls["2022"]["posts"][-1])
+    setStatusString("got {} users".format(len(users)), status.OK)
+    # code here. 
+
 def main():
     ensureTables()
 
@@ -469,6 +549,10 @@ def main():
                 embedItems.append( { "value": "{}: {} posts".format(year, posts), "type": EmbedInputTypes.LABLE } )
                 
             embed("u/{}".format(user), embedItems)
+            flair_s = checkUser(user)
+            if flair_s:
+                setStatusString("Giving {} {}".format(user, flair_s), status.INFO)
+                applyFlair(user, flair_s)
 
     def fetchRollcalls():
         setStatusString("searching...", status.INFO)
@@ -485,7 +569,7 @@ def main():
 
     menuSystem( [ 
         [ "Check Flairs", checkFlairList() ],
-        [ "Flair Actions", [ { "title": "Apply Flairs", "run": "" }, { "title": "Check User", "run": test } ] ],
+        [ "Flair Actions", [ { "title": "Apply Flairs", "run": applyAllFlairs }, { "title": "Check User", "run": test } ] ],
         [ "Misc", [ { "title": "Clear Database", "run": deleteDataAction }, { "title": "View Source Code", "run": lambda: webbrowser.open("https://github.com/ffamilyfriendly/AuntieRobot/tree/main/FlairAssign_new") }, { "title": "fetch rollcalls", "run": fetchRollcalls } ] ]
      ] )
     #getYear(2022)
