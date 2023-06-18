@@ -326,6 +326,9 @@ def menuSystem( menuItems ):
     menuSystem( menuItems )
 
 def getFlairValue( flair: str ):
+    if not flair:
+        return 0
+    
     sanatized_flair = flair.strip().lower()
     # if flair starts with these it'll have a large flair value
     # we do not want to re-flair all mods or the... turkey fucker
@@ -513,16 +516,20 @@ def applyAllFlairs():
     prog_int = 0
 
     for user in users:
+        username = user[0]
         prog_int = prog_int + 1
         # Get the flair the user should be given
-        entitled_flair = checkUser(user)
+        entitled_flair = checkUser(username)
 
         # Apply the flair to the user
-        applyFlair(user, entitled_flair)
+        try:
+            applyFlair(username, entitled_flair)
+        except:
+            print("Something went wrong when trying to give {} their flair".format(username))
 
         # Update the progress bar and sleep
         postProgress("Applying flairs", prog_int, len(users))
-        time.sleep(0.3)
+        time.sleep(0.5)
 
 
 def main():
