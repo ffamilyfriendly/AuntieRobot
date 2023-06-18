@@ -37,7 +37,7 @@ def getUser(user):
 
 def getUsers(post_id):
     cur = dbCon.cursor()
-    res = cur.execute("SELECT DISTINCT user FROM posts WHERE post=?", (post_id,))
+    res = cur.execute("SELECT DISTINCT posts.user FROM posts LEFT JOIN users ON users.user = posts.user WHERE users.user IS NULL AND post = ?", (post_id,))
     return res.fetchall()
 
 def getUserPosts(username):
@@ -325,6 +325,27 @@ def menuSystem( menuItems ):
     
     menuSystem( menuItems )
 
+def getFlairValue( flair: str ):
+    sanatized_flair = flair.strip().lower()
+    # if flair starts with these it'll have a large flair value
+    # we do not want to re-flair all mods or the... turkey fucker
+    # lord give me strength 
+    no_allowed_start = [ "nut", "turkey" ]
+
+
+
+    for item in no_allowed_start:
+        if sanatized_flair.startswith(item):
+            return 666
+
+    if "fourfold" in sanatized_flair:
+        return 4
+    if "treble" in sanatized_flair:
+        return 3
+    if "and" in sanatized_flair:
+        return 2
+    return 1
+
 def applyFlair( user: str, flair: str ):
     if not flair or not user:
         return False
@@ -340,9 +361,14 @@ def applyFlair( user: str, flair: str ):
     # We dont want to give trebble by mistake to a fourfold
     # if worth of new flair is less than old flair try sending a dm to user explaining
 
+    if getFlairValue(oldFlair) > getFlairValue(flair):
+        # Older flair has a better value. Here we should DM the user and let them decide
+        print("old: {} > new: {}".format(getFlairValue(oldFlair), getFlairValue(flair)))
+        client.redditor(user).message("About your flair", "Hi! I'm the r/nonutnovember flair bot.\nYou are entitled to the `{}` flair but it appears you already have a flair of greater significanse (`{}`).\n\nPlease post a comment [here](https://www.reddit.com/r/AuntieRobot/comments/14cjjor/flair_disputes/?) with how you would like to proceed.".format(flair, oldFlair))
+        return insertUser(user, oldFlair, "NOT_APPLIED: '{}'".format(flair))
+
     client.subreddit("nonutnovember").flair.set(user, text=flair)
-    insertUser(user, oldFlair, flair)
-    return True
+    return insertUser(user, oldFlair, flair)
     
 
 
@@ -409,9 +435,6 @@ def checkUser( username ):
 
         years_flairs[year] = True
 
-    print(years)
-    print(years_flairs)
-    print(constructFlair(years_flairs))
     return constructFlair(years_flairs)
 
 def checkPost( year, post_id ):
@@ -486,7 +509,21 @@ def yearSelectMode(year):
 def applyAllFlairs():
     users = getUsers(rollcalls["2022"]["posts"][-1])
     setStatusString("got {} users".format(len(users)), status.OK)
-    # code here. 
+
+    prog_int = 0
+
+    for user in users:
+        prog_int = prog_int + 1
+        # Get the flair the user should be given
+        entitled_flair = checkUser(user)
+
+        # Apply the flair to the user
+        applyFlair(user, entitled_flair)
+
+        # Update the progress bar and sleep
+        postProgress("Applying flairs", prog_int, len(users))
+        time.sleep(0.3)
+
 
 def main():
     ensureTables()
@@ -538,7 +575,6 @@ def main():
             yearList = {}
             embedItems = []
             for row in res:
-                print(row)
                 aids = yearList.get(row[0])
                 if aids:
                     yearList[row[0]] = aids + 1
